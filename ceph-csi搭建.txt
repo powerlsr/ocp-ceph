@@ -1,0 +1,133 @@
+	上传镜像到ocp镜像仓库
+docker save -o csi-node-driver-registrar.tar quay.io/k8scsi/csi-node-driver-registrar:v1.3.0
+docker save -o csi-resizer.tar quay.io/k8scsi/csi-resizer:v0.5.0
+docker save -o csi-snapshotter.tar quay.io/k8scsi/csi-snapshotter:v2.1.0
+docker save -o csi-attacher.tar quay.io/k8scsi/csi-attacher:v2.1.1
+docker save -o csi-provisioner.tar quay.io/k8scsi/csi-provisioner:v1.6.0
+docker save -o cephcsi quay.io/cephcsi/cephcsi:v3.1.2
+docker save -o cephcsi.tar quay.io/cephcsi/cephcsi:v3.1.2 
+docker save -o snapshot-controller.tar k8s.gcr.io/sig-storage/snapshot-controller:v2.1.1
+
+	登录OCP平台console节点,将本地镜像导入OCP仓库
+Podman load  csi-provisioner.tar
+Podman login  –u root  –p rootroot registry.example.com:5050 
+Podman tag quay.io/k8scsi/csi-provisioner:v1.6.0 registry.example.com:5050/csi-provisioner:v1.6.0
+Podman push registry.example.com:5050/csi-provisioner:v1.6.0
+
+	查看导入结果
+# podman search registry.example.com:5050/
+INDEX              NAME                                                  DESCRIPTION   STARS   OFFICIAL   AUTOMATED
+example.com:5050   registry.example.com:5050/cephcsi                                   0                  
+example.com:5050   registry.example.com:5050/csi-attacher                              0                  
+example.com:5050   registry.example.com:5050/csi-node-driver-registrar                 0                  
+example.com:5050   registry.example.com:5050/csi-provisioner                           0                  
+example.com:5050   registry.example.com:5050/csi-resizer                               0                  
+example.com:5050   registry.example.com:5050/csi-snapshotter                           0                  
+example.com:5050   registry.example.com:5050/ocp4/openshift4                           0                  
+example.com:5050   registry.example.com:5050/snapshot-controller                       0
+           
+	下载ceph-csi项目
+# git clone https://github.com/ceph/ceph-csi.git
+# cd ceph-csi
+# git checkout –b v3.1 remotes/origin/release-v3.1
+
+	修改deploy中的csi-config-map.yaml文件的配置，设置ceph集群的集群ID及monitore节点及端口号
+# cd ceph-csi/deploy/rbd/kubernetes
+# cat deploy/rbd/kubernetes/csi-config-map.yaml  
+---
+apiVersion: v1
+kind: ConfigMap
+data:
+  config.json: |-
+    [
+     {
+        "clusterID": "45d30885-e811-461a-a995-19f5b2946268", 注意在此没有设置redosnamespace，如果设置了而ceph集群中又没有设置相关的namespace的话会导致因为namespace的原因在对应的pool/namespce/中创建imae创建不成功，如果ceph没有设置namespace则不要设置相应的radosnamespace
+        "monitors": [
+          "10.152.20.50:6789",
+          "10.152.20.51:6789",
+          "10.152.10.52:6789"
+         ]
+     }
+    ]
+metadata:
+  name: ceph-csi-config
+
+	注释掉deploy/rbd/kubernetes/csi-rbdplugin-provisioner.yaml和deploy/rbd/kubernetes/csi-rbdplugin.yaml的kms配置
+#- name: ceph-csi-encryption-kms-config
+#  mountPath: /etc/ceph-csi-encryption-kms-config/
+#- name: ceph-csi-encryption-kms-config
+# configMap:
+#    name: ceph-csi-encryption-kms-config
+
+	如果有自己设置的namespace 则需要修改deploy中的deploy/rbd/kubernetes/csi-rbdplugin-provisioner.yaml和deploy/rbd/kubernetes/csi-rbdplugin.yaml中的namespace的设置
+
+	修改csi-rbdplugin-provisioner.yaml和csi-rbdplugin.yaml中的所有的image的源为本地源，如下所示：
+containers:
+        - name: csi-provisioner
+          image: registry.example.com:5050/csi-provisioner:v1.6.0
+          ...
+          image: registry.example.com:5050/cephcsi:v3.1.2  
+
+	启动cephcsi容器
+# oc create -f csi-provisioner-rbac.yaml
+# oc create -f csi-nodeplugin-rbac.yaml
+# oc create -f csi-config-map.yaml
+# oc create -f csi-cephfsplugin-provisioner.yaml
+# oc create -f csi-cephfsplugin.yaml
+# oc get pods
+NAME                                         READY   STATUS    RESTARTS   AGE
+csi-rbdplugin-5rv8p                          3/3     Running   0          65m
+csi-rbdplugin-provisioner-7c8f76f84b-fswn4   6/6     Running   0          67m
+csi-rbdplugin-provisioner-7c8f76f84b-t2sjg   6/6     Running   0          67m
+csi-rbdplugin-provisioner-7c8f76f84b-vxw29   6/6     Running   0          67m
+csi-rbdplugin-tnzkn                          3/3     Running   0          65m
+csi-rbdplugin-zk5kn                          3/3     Running   0          65m
+
+	设置安全秘钥及访问ceph集群安全设置：设置secret.yaml 为相应的namespace在此我们使用default namespace 设置ceph集群的用户及对应的key，这里可以在ceph集群中单独创建一个用户
+cat >> secret.yaml << EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: csi-rbd-secret
+  namespace: default 可以修改为自己定义的namespace，但是deploy的ceph-csi相关的所有yaml文件中都要进行相应的修改’
+stringData:
+  userID: admin    ceph集群的用户，也可以自己创建一个
+  userKey: AQBFc7NfNyh2FBAAAT8j59c6Hn3IGwiqqS06Iw==   该用户对应的key
+
+  # Encryption passphrase
+  encryptionPassphrase: test_passphrase
+EOF
+
+# oc create -f secret.yaml
+
+	设置storageclass 并使用
+# cat >> storageclass.yaml << EOF
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+   name: csi-rbd-sc
+provisioner: rbd.csi.ceph.com   是在ceph-csi的provisionser的yaml中定义的
+parameters:
+pool: rbdpool  对应的ceph的给rbd使用的pool
+csi.storage.k8s.io/provisioner-secret-name: csi-rbd-secret
+   csi.storage.k8s.io/provisioner-secret-namespace: default              csi.storage.k8s.io/controller-expand-secret-name: csi-rbd-secret
+   csi.storage.k8s.io/controller-expand-secret-namespace: default
+   csi.storage.k8s.io/node-stage-secret-name: csi-rbd-secret
+   csi.storage.k8s.io/node-stage-secret-namespace: default
+   # Specify the filesystem type of the volume. If not specified,
+csi.storage.k8s.io/fstype: ext4
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+mountOptions:
+   - discard
+# oc create -f storageclass.yaml
+
+	确认已经存在的storageclass和volumeSnapshotClass
+# oc get storageclass
+NAME            PROVISIONER           AGE
+csi-cephfs-sc   cephfs.csi.ceph.com   18d
+csi-rbd-sc      rbd.csi.ceph.com      18d
+# oc get volumeSnapshotClass
+NAME                         DRIVER                DELETIONPOLICY   AGE
+csi-cephfsplugin-snapclass   cephfs.csi.ceph.com   Delete           18d
+csi-rbdplugin-snapclass      rbd.csi.ceph.com      Delete           27d
