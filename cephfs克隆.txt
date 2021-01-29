@@ -1,0 +1,42 @@
+	创建cephfs-pvc-test-1的clone pvc
+# cat >> cephfs-pvc-test-1-clone-pvc.yaml  << EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cephfs-pvc-test-1-clone-pvc
+spec:
+  storageClassName: csi-cephfs-sc
+  dataSource:
+    name: cephfs-pvc-test-1
+    kind: PersistentVolumeClaim
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 12Gi
+EOF
+# oc apply -f cephfs-pvc-test-1-clone-pvc.yaml
+# oc get pvc | grep clone | grep test
+cephfs-pvc-test-1-clone-pvc    Bound         pvc-b9879cf1-2ab7-40fa-b642-7b70d48e1477   12Gi       RWX            csi-cephfs-sc   10s
+
+	创建pod并使用clone的pvc cephfs-pvc-test-1-clone-pvc
+# cat >> cephfs-pvc-test-1-clone-pvc-pod.yaml << EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cephfs-pvc-test-1-clone-pvc-pod
+spec:
+  containers:
+    - name: busybox
+      image: busybox
+      volumeMounts:
+        - name: mypvc
+          mountPath: /tmp
+      command: ['/bin/sh','-c','sleep 300d']
+  volumes:
+    - name: mypvc
+      persistentVolumeClaim:
+        claimName: cephfs-pvc-test-1-clone-pvc  
+        readOnly: false
+EOF
+# oc apply -f cephfs-pvc-test-1-clone-pvc-pod.yaml
