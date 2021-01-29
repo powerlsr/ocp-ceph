@@ -1,0 +1,117 @@
+	创建并查看pvc rbd-pvc-test-1
+# cat >> rbd-pvc-test-1.yaml  << EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rbd-pvc-test-1
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 6Gi
+  storageClassName: csi-rbd-sc
+EOF
+
+# oc apply -f rbd-pvc-test-1.yaml
+# oc get pvc | grep rbd-pvc-test-1
+rbd-pvc-test-1                 Bound         pvc-c962d9f8-d369-4220-b32c-a2192067f076   6Gi        RWO            csi-rbd-sc      23s
+
+	创建pod并使用新建的pvc rbd-pvc-test-1
+# cat >> rbd-pvc-test-1-pod.yaml << EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rbd-pvc-test-1-pod
+spec:
+  containers:
+    - name: busybox
+      image: busybox
+      volumeMounts:
+        - name: mypvc
+          mountPath: /tmp
+      command: ['/bin/sh','-c','sleep 300d']
+  volumes:
+    - name: mypvc
+      persistentVolumeClaim:
+        claimName: rbd-pvc-test-1 
+        readOnly: false
+EOF
+# oc apply -f rbd-pvc-test-1-pod.yaml
+# oc exec   rbd-pvc-test-1-pod -- df
+Filesystem           1K-blocks      Used Available Use% Mounted on
+/dev/rbd0              6061632     24568   6020680   0% /tmp
+
+	新建文件/tmp/1，写入before
+# oc rsh rbd-pvc-test-1-pod
+/ # echo before > /tmp/1
+
+	创建并查看快照rbd-pvc-test-1-snap-1
+# cat >>rbd-pvc-test-1-snap-1.yaml << EOF
+apiVersion: snapshot.storage.k8s.io/v1beta1
+kind: VolumeSnapshot
+metadata:
+  name: rbd-pvc-test-1-snap-1
+spec:
+  volumeSnapshotClassName: csi-rbdplugin-snapclass
+  source:
+    persistentVolumeClaimName: rbd-pvc-test-1
+EOF
+# oc apply -f cephfs-pvc-test-1-snap-1.yaml
+# oc get VolumeSnapshot  | grep test
+rbd-pvc-test-1-snap-1      false        rbd-pvc-test-1                                            csi-rbdplugin-snapclass      snapcontent-505e4644-ef18-40dd-b823-6b524e8ae315                  14s
+
+	创建基于快照cephfs-pvc-test-1-snap-1的pvc
+# cat >> rbd-pvc-test-1-snap-1-pvc.yaml << EOF 
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rbd-pvc-test-1-snap-1-pvc
+spec:
+  storageClassName: csi-rbd-sc
+  dataSource:
+    name: rbd-pvc-test-1-snap-1
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 6Gi
+EOF
+# oc get pvc | grep rbd | grep test
+rbd-pvc-test-1                 Bound         pvc-c962d9f8-d369-4220-b32c-a2192067f076   6Gi        RWO            csi-rbd-sc      32h
+rbd-pvc-test-1-snap-1-pvc      Bound         pvc-7b7260bc-1677-49a4-91ba-fa47fc05c26e   6Gi        RWO            csi-rbd-sc      17s
+
+	向原pvc写入数据
+# oc rsh rbd-pvc-test-1-pod
+/ # cd /tmp
+/tmp # echo after >> 1
+/tmp # cat 1
+before
+After
+
+	新建pod rbd-pvc-test-1-pod-snap-1，使用rbd-pvc-test-1-snap-1-pvc,确认数据与快照一致
+# cat >> rbd-pvc-test-1-pod-snap-1.yaml << EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rbd-pvc-test-1-pod-snap-1
+spec:
+  containers:
+    - name: busybox
+      image: busybox
+      volumeMounts:
+        - name: mypvc
+          mountPath: /tmp
+      command: ['/bin/sh','-c','sleep 300d']
+  volumes:
+    - name: mypvc
+      persistentVolumeClaim:
+        claimName: rbd-pvc-test-1-snap-1-pvc 
+        readOnly: false
+EOF
+# oc apply -f rbd-pvc-test-1-pod-snap-1.yaml
+# oc rsh rbd-pvc-test-1-pod-snap-1
+/ # cat /tmp/1
+Before
