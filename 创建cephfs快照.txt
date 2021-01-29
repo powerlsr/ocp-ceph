@@ -1,0 +1,117 @@
+	创建并查看pvc cephfs-pvc-test-1
+# cat >> cephfs-pvc-test-1.yaml  << EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cephfs-pvc-test-1
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 6Gi
+  storageClassName: csi-cephfs-sc
+EOF
+# oc apply -f cephfs-pvc-test-1.yaml
+# oc get pvc cephfs-pvc-test-1 
+cephfs-pvc-test-1     Bound         pvc-fe16865e-73e5-41a0-b25f-f689689325a9   6Gi        RWO            csi-cephfs-sc   7s
+
+	创建pod并使用新建的pvc cephfs-pvc-test-1
+# cat >> cephfs-pvc-test-1-pod.yaml << EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cephfs-pvc-test-1-pod
+spec:
+  containers:
+    - name: busybox
+      image: busybox
+      volumeMounts:
+        - name: mypvc
+          mountPath: /tmp
+      command: ['/bin/sh','-c','sleep 300d']
+  volumes:
+    - name: mypvc
+      persistentVolumeClaim:
+        claimName: cephfs-pvc-test-1  
+        readOnly: false
+EOF
+# oc apply -f cephfs-pvc-test-1-pod.yaml
+# oc exec   cephfs-pvc-test-1-pod -- df
+Filesystem           1K-blocks      Used Available Use% Mounted on
+10.152.20.50:6789,10.152.20.51:6789,10.152.20.52:6789:/volumes/csi/csi-vol-ff6a2fd2-48f0-11eb-af6f-0a580abc021a/f4091dee-fff3-4d32-997c-c7ac072ed9be
+                       6291456         0   6291456   0% /tmp
+
+	新建文件/tmp/1，写入before
+# oc  rsh   cephfs-pvc-test-1-pod
+/ # echo before > /tmp/1
+
+	创建并查看快照cephfs-pvc-test-1-snap-1
+# cat >>cephfs-pvc-test-1-snap-1.yaml << EOF
+apiVersion: snapshot.storage.k8s.io/v1beta1
+kind: VolumeSnapshot
+metadata:
+  name: cephfs-pvc-test-1-snap-1
+spec:
+  volumeSnapshotClassName: csi-cephfsplugin-snapclass
+  source:
+    persistentVolumeClaimName: cephfs-pvc-test-1
+EOF
+# oc apply -f cephfs-pvc-test-1-snap-1.yaml
+# oc get VolumeSnapshot  | grep test
+cephfs-pvc-test-1-snap-1   true         cephfs-pvc-test-1                           6Gi           csi-cephfsplugin-snapclass   snapcontent-2f2c1a6e-f1ba-4dbd-bd16-2df0fddcb114   <invalid>      17m
+
+	创建基于快照cephfs-pvc-test-1-snap-1的pvc cephfs-pvc-test-1-snap-1-pvc
+# cat >> cephfs-pvc-test-1-snap-1-pvc.yaml << EOF 
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cephfs-pvc-test-1-snap-1-pvc
+spec:
+  storageClassName: csi-cephfs-sc
+  dataSource:
+    name: cephfs-pvc-test-1-snap-1
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 6Gi
+EOF
+# oc get pvc cephfs-pvc-test-1
+cephfs-pvc-test-1              Bound         pvc-fe16865e-73e5-41a0-b25f-f689689325a9   6Gi        RWO            csi-cephfs-sc   41h
+cephfs-pvc-test-1-snap-1-pvc   Bound         pvc-0e3777d2-8b8f-4be9-8da5-ef0eb303dec0   6Gi        RWX            csi-cephfs-sc   16s
+
+	向原pvc写入数据
+# oc rsh cephfs-pvc-test-1-pod
+/ # cd /tmp
+/tmp # echo after >> 1
+/tmp # cat 1
+before
+After
+
+	新建pod cephfs-pvc-test-1-pod-snap-1，使用cephfs-pvc-test-1-snap-1-pvc,确认数据与快照一致
+# cat >> cephfs-pvc-test-1-pod-snap-1.yaml << EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cephfs-pvc-test-1-pod-snap-1
+spec:
+  containers:
+    - name: busybox
+      image: busybox
+      volumeMounts:
+        - name: mypvc
+          mountPath: /tmp
+      command: ['/bin/sh','-c','sleep 300d']
+  volumes:
+    - name: mypvc
+      persistentVolumeClaim:
+        claimName: cephfs-pvc-test-1-snap-1-pvc 
+        readOnly: false
+EOF
+# oc apply -f cephfs-pvc-test-1-pod-snap-1.yaml
+# oc rsh cephfs-pvc-test-1-pod-snap-1
+/ # cat /tmp/1
+Before
