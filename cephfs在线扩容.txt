@@ -1,0 +1,7 @@
+	查看pvc的信息
+# oc get pvc cephfs-pvc-test-1
+NAME                STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS    AGE
+cephfs-pvc-test-1   Bound    pvc-fe16865e-73e5-41a0-b25f-f689689325a9   6Gi       RWO            csi-cephfs-sc   6d21h
+
+	在线扩容pvc
+# oc patch pvc cephfs-pvc-test-1  -p '{"spec":{"resources":{"requests":{"storage": "18Gi"}}}}'
