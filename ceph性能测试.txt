@@ -1,0 +1,22 @@
+	登录压力测试机
+# ssh 10.152.15.42
+
+	安装ceph-common-12.2.11-0.el7.ppc64le
+# yum install ceph-common
+
+	拷贝ceph集群的ceph.conf 及admin的key
+# scp 10.152.20.50:/etc/ceph/ceph.conf /etc/ceph/
+# scp 10.152.20.50:/etc/ceph/ceph.client.admin.keyring /etc/ceph/
+
+	创建 rbd image 
+# rbd create rbdpool/rbdtest --size 20480
+
+	映射image
+# rbd map rbdpool/rbdtest
+# rbd showmapped
+id pool           image       snap device    
+0  rbdpool        rbdtest -    /dev/rbd0
+
+	格式化并挂载
+# mkfs -t ext4  /dev/rbd0
+# mount /dev/rbd0  /data
