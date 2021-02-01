@@ -1,0 +1,51 @@
+	创建rbd-pvc-test-1的clone pvc：rbd-pvc-test-1-clone-pvc
+# cat >> rbd-pvc-test-1-clone-pvc.yaml << EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rbd-pvc-test-1-clone-pvc
+spec:
+  storageClassName: csi-rbd-sc
+  dataSource:
+    name: rbd-pvc-test-1              
+    kind: PersistentVolumeClaim
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 6Gi 
+EOF
+
+# oc apply -f rbd-pvc-test-1-clone-pvc.yaml
+# oc get pvc | grep rbd-pvc-test-1-clone
+rbd-pvc-test-1-clone-pvc       Bound         pvc-4a7285df-91cd-4d3f-bb65-4ef99fbcd203   6Gi        RWO            csi-rbd-sc      14s
+
+	新建pod rbd-pvc-test-1-clone-pvc-pod，使用rbd-pvc-test-1-clone-pvc,确认数据与原pvc一致
+# cat >> rbd-pvc-test-1-clone-pvc-pod.yaml << EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rbd-pvc-test-1-clone-pvc-pod
+spec:
+  containers:
+    - name: busybox
+      image: busybox
+      volumeMounts:
+        - name: mypvc
+          mountPath: /tmp
+      command: ['/bin/sh','-c','sleep 300d']
+  volumes:
+    - name: mypvc
+      persistentVolumeClaim:
+        claimName: rbd-pvc-test-1-clone-pvc
+        readOnly: false
+EOF
+
+# oc apply -f rbd-pvc-test-1-clone-pvc-pod.yaml 
+# oc rsh rbd-pvc-test-1-clone-pvc-pod
+# cd /tmp
+/tmp # echo clone >> /tmp/1
+/tmp # cat /tmp/1
+before
+after
+clone
