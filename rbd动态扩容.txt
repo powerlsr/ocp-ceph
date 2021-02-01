@@ -1,0 +1,7 @@
+	查看pvc的信息
+# oc get pvc rbd-pvc-test-1
+NAME             STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+rbd-pvc-test-1   Bound    pvc-c962d9f8-d369-4220-b32c-a2192067f076   6Gi        RWO            csi-rbd-sc     4d21h
+
+	在线扩容pvc
+# oc patch pvc rbd-pvc-test-1  -p '{"spec":{"resources":{"requests":{"storage": "18Gi"}}}}'
