@@ -1,0 +1,39 @@
+	新建性能测试用pvc rbd-pvc-ptest-1
+# cat >> rbd-pvc-ptest-1.yaml  << EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rbd-pvc-ptest-1
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: csi-rbd-sc
+EOF
+# oc apply -f rbd-pvc-ptest-1.yaml
+
+	新建性能测试用pod 
+# cat >> rbd-ptest-pod-1.yaml << EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rbd-ptest-pod-1
+  namespace: default
+spec:
+  containers:
+  - command:
+    image: centos
+    tty: true
+    name: mysql
+    volumeMounts:
+    - mountPath: /data
+      name: mypvc
+  volumes:
+  - name: mypvc
+    persistentVolumeClaim:
+      claimName: rbd-pvc-ptest-1
+EOF
+# oc apply -f rbd-ptest-pod-1.yaml
+# oc rsh  rbd-ptest-pod-1
